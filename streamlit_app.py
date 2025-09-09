@@ -1,79 +1,44 @@
-# Colab setup
-pip install easyocr opencv-python-headless pandas openpyxl
+import streamlit as st
+import requests
+import json
 
-import easyocr
-import cv2
-import pandas as pd
-import re
-import os
+# OCR.space API key
+API_KEY = "K84160666388957"
+API_URL = "https://api.ocr.space/parse/image"
 
-# EasyOCR modelini Türkçe + İngilizce yükle
-reader = easyocr.Reader(['tr','en'])
+st.set_page_config(page_title="Fatura OCR", layout="centered")
+st.title("📄 Fatura OCR Arayüzü")
 
-def clean_amount(value):
-    """OCR'dan gelen tutarları normalize et"""
-    if not value:
-        return ""
-    val = re.sub(r"[^\d,\.]", "", value)  # sadece rakam ve noktalama kalsın
-    val = val.replace(".", "").replace(",", ".")  # Türkçe formatı normalize et
-    try:
-        return float(val)
-    except:
-        return value
+uploaded_file = st.file_uploader("Fatura yükle (JPG/PNG/PDF)", type=["jpg", "jpeg", "png", "pdf"])
 
-def parse_invoice(image_path):
-    """Faturayı oku ve JSON formatında verileri çıkar"""
-    results = reader.readtext(image_path, detail=0)
-    text = " ".join(results)
+if uploaded_file is not None:
+    # OCR.space API çağrısı
+    with st.spinner("OCR işleniyor..."):
+        files = {"file": uploaded_file.getvalue()}
+        payload = {
+            "apikey": API_KEY,
+            "language": "tur",  # Türkçe destek
+            "isOverlayRequired": False
+        }
 
-    invoice_data = {
-        "Fatura No": "",
-        "Fatura Tarihi": "",
-        "Alıcının Adı/Ünvanı": "",
-        "Alıcının Adresi": "",
-        "VK Bilgisi": "",
-        "V.D.H. No": "",
-        "Telefon": "",
-        "Bağlı olduğu V.D.": "",
-        "Vergi sicil no": "",
-        "Miktar": [],
-        "Açıklama": [],
-        "Birim": [],
-        "Tutar": [],
-        "Ara Toplam": "",
-        "KDV": "",
-        "Genel Toplam": "",
-        "Yazı ile toplam": ""
-    }
+        response = requests.post(API_URL, files={"file": uploaded_file}, data=payload)
+        result = response.json()
 
-    # Basit regex örnekleri
-    fatura_no = re.search(r"Fatura\s*No[:\s]*([A-Za-z0-9-]+)", text, re.IGNORECASE)
-    if fatura_no:
-        invoice_data["Fatura No"] = fatura_no.group(1)
+    st.success("OCR işlemi tamamlandı ✅")
 
-    tarih = re.search(r"(\d{2}[./-]\d{2}[./-]\d{4})", text)
-    if tarih:
-        invoice_data["Fatura Tarihi"] = tarih.group(1)
+    # Orijinal JSON göster
+    st.subheader("Ham JSON")
+    st.json(result)
 
-    genel_toplam = re.search(r"(Genel Toplam|TOPLAM)[:\s]*([\d.,]+)", text, re.IGNORECASE)
-    if genel_toplam:
-        invoice_data["Genel Toplam"] = clean_amount(genel_toplam.group(2))
+    # ParsedText alanını al
+    parsed_text = result["ParsedResults"][0]["ParsedText"] if "ParsedResults" in result else ""
+    st.subheader("Çıkarılan Metin")
+    st.text_area("OCR Sonucu", parsed_text, height=300)
 
-    return invoice_data
-
-def process_invoices(image_paths, excel_path="invoices.xlsx"):
-    """Birden fazla faturayı işle ve Excel’e yaz"""
-    all_invoices = []
-
-    for path in image_paths:
-        data = parse_invoice(path)
-        all_invoices.append(data)
-
-    df = pd.DataFrame(all_invoices)
-    df.to_excel(excel_path, index=False)
-    print(f"✅ Excel kaydedildi: {excel_path}")
-
-# Örnek kullanım
-uploaded_files = ["fatura1.jpg", "fatura2.png"]  # kendi fatura resimlerini yükle
-process_invoices(uploaded_files, "faturalar.xlsx")
-
+    # İndirilebilir TXT çıktısı
+    st.download_button(
+        label="📥 OCR Metnini İndir (TXT)",
+        data=parsed_text,
+        file_name="ocr_output.txt",
+        mime="text/plain"
+    )
